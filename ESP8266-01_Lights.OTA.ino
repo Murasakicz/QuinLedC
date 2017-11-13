@@ -110,11 +110,16 @@ void callback(char* topic, uint8_t* payload, unsigned int length) {
 
     if (topicSwitch) {
       if (valueInt) {
-        logInfo("Switch on LED1");
+        if (led1Value > 0){
+          logInfo("Switch already on LED1");
+        }else{
+          led1SetValue = 1023;
+          logInfo("Switch on LED1");
+        }
       } else {
+        led1SetValue = 0;
         logInfo("Switch off LED1");
       }
-      led1SetValue = valueInt ? 1023 : 0;
     }
 
     myESP.publish(MQTT_ID "/Led1/status", led1SetValue ? "1" : "0");
@@ -129,11 +134,16 @@ void callback(char* topic, uint8_t* payload, unsigned int length) {
     }
     if (topicSwitch) {
       if (valueInt) {
-        logInfo("Switch on LED2");
+        if (led2Value > 0){
+          logInfo("Switch already on LED2");
+        }else{
+          led2SetValue = 1023;
+          logInfo("Switch on LED2");
+        }
       } else {
+        led2SetValue = 0;
         logInfo("Switch off LED2");
       }
-      led2SetValue = valueInt ? 1023 : 0;
     }
     myESP.publish(MQTT_ID "/Led2/status", led2SetValue ? "1" : "0");
     myESP.publish(MQTT_ID "/Led2/rvalue", String(led2SetValue).c_str());

@@ -1,159 +1,143 @@
 #include "ESPHelper.h"
+#include "logBuffer.h"
+
 
 netInfo homeNet = {  .mqttHost = "192.168.100.20",     //can be blank if not using MQTT
-          .mqttUser = "",   //can be blank
-          .mqttPass = "",   //can be blank
-          .mqttPort = 1883,         //default port for MQTT is 1883 - only chance if needed.
-          .ssid = "", 
-          .pass = ""};
+                     .mqttUser = "",   //can be blank
+                     .mqttPass = "",   //can be blank
+                     .mqttPort = 1883,         //default port for MQTT is 1883 - only chance if needed.
+                     .ssid = "",
+                     .pass = ""
+                  };
 
 ESPHelper myESP(&homeNet);
+ESP8266WebServer server(80);
 
-const char* mqtt_id = "/QuinLed_1";
-const int pwm_startup = 5;
-const int fadeout = 5;
-int led1Value, led2Value;
-int led1SetValue, led2SetValue;
 
-const byte ledPin1 = 0; // Pin with 0
-const byte ledPin2 = 2; // Pin with 1
+#define MQTT_ID "/QuinLed_1"
+#define PIN_LED1 0 // Pin with 0
+#define PIN_LED2 2 // Pin with 1
 
-char* join(const char* a, char* b)
-{
-  int lenA = strlen(a);
-  int lenB = strlen(b);
-  char* solution = (char*) malloc(lenA + lenB + 1);
-  memcpy(solution, a, lenA);
-  memcpy(solution + lenA, b, lenB);
-  solution[lenA + lenB] = '\0';
- 
-  return solution;
+
+int led1Value = 0, led2Value = 0;
+int led1SetValue = 0, led2SetValue = 0;
+uint32_t ledFadeTime = 0;
+
+
+void ledFade() {
+  if (millis() - ledFadeTime < 4ul) return;
+  ledFadeTime = millis();
+
+  if (led1Value < led1SetValue) {
+    led1Value++;
+  }
+  if (led1Value > led1SetValue) {
+    led1Value--;
+  }
+
+  if (led2Value < led2SetValue) {
+    led2Value++;
+  }
+  if (led2Value > led2SetValue) {
+    led2Value--;
+  }
+
+  analogWrite(PIN_LED1, led1Value);
+  analogWrite(PIN_LED2, led2Value);
 }
 
-char* inttochar(int i){
-  int n = log10(i) + 1;
-  char * str = (char*) malloc(n+1);
-  itoa(i, str, 10);
-  return str;
-  }
-
-void ledFade(){
-  if (led1Value < led1SetValue){ led1Value++; }
-  if (led1Value > led1SetValue){ led1Value--; }
-
-  if (led2Value < led2SetValue){ led2Value++; }
-  if (led2Value > led2SetValue){ led2Value--; }
-
-  analogWrite(ledPin1, led1Value);
-  analogWrite(ledPin2, led2Value);
-  delay(fadeout);
-  }
-
 void setup() {
-  
+  pinMode(PIN_LED1, OUTPUT);
+  pinMode(PIN_LED2, OUTPUT);
+  analogWrite(PIN_LED1, 0);
+  analogWrite(PIN_LED2, 0);
+
   Serial.begin(115200); //start the serial line
   delay(500);
 
-  Serial.println("Starting Up, Please Wait...");
+  logInfo("Starting Up, Please Wait...");
 
   myESP.OTA_enable();
   myESP.OTA_setPassword("Mura153624saki");
   myESP.OTA_setHostnameWithVersion("Lights.v1");
 
-  myESP.addSubscription(join(mqtt_id,"/Led1/value"));
-  myESP.addSubscription(join(mqtt_id,"/Led2/value"));
-  myESP.addSubscription(join(mqtt_id,"/Led1/switch"));
-  myESP.addSubscription(join(mqtt_id,"/Led2/switch"));
+  myESP.addSubscription(MQTT_ID "/Led1/value");
+  myESP.addSubscription(MQTT_ID "/Led2/value");
+  myESP.addSubscription(MQTT_ID "/Led1/switch");
+  myESP.addSubscription(MQTT_ID "/Led2/switch");
 
   myESP.setMQTTCallback(callback);
   myESP.begin();
 
-  pinMode(ledPin1, OUTPUT);
-  pinMode(ledPin2, OUTPUT);
-  analogWrite(ledPin1, pwm_startup);
-  analogWrite(ledPin2, pwm_startup);
-  
-  Serial.println("Initialization Finished.");
+
+  server.on("/log", HTTP_GET, []() {
+    logBuffer.dumpTo(&server);
+  });
+  server.begin();
+
+
+  logInfo("Initialization Finished.");
 }
 
-void loop(){
+void loop() {
   myESP.loop();  //run the loop() method as often as possible - this keeps the network services running
-
-  //Put application code here
+  server.handleClient();
   ledFade();
-  yield();
 }
 
 void callback(char* topic, uint8_t* payload, unsigned int length) {
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  char value[5] = {""};
-  for (int i = 0; i < length; i++) {
-    value[i]=(char)payload[i];
+  logValue("Message arrived to topic: ", topic);
+
+  if (length > 4) {
+    logInfo("Message too long, ignored");
+    return;
   }
 
-  char* _led1 = strstr(topic,"Led1");
-  char* _led2 = strstr(topic,"Led2");
-  char* _switch = strstr(topic,"switch");
-  char* _value = strstr(topic,"value");
+  char valueRaw[5] = {0, 0, 0, 0, 0};
+  strncpy(valueRaw, (char*)payload, length);
+  int valueInt = String(valueRaw).toInt();
 
-  if (_led1){
-    if (_value){
-      led1SetValue= atoi( value );
-      Serial.print("setting value to:");
-      Serial.print(atoi( value ));
-      if (led1SetValue  == 0) { myESP.publish(join(mqtt_id,"/Led1/status"),"0"); }
-      else {myESP.publish(join(mqtt_id,"/Led1/status"),"1");}
+  bool topicLed1 = strstr(topic, "Led1") != NULL;
+  bool topicLed2 = strstr(topic, "Led2") != NULL;
+  bool topicSwitch = strstr(topic, "switch") != NULL;
+  bool topicValue = strstr(topic, "value") != NULL;
+
+  if (topicLed1) {
+    if (topicValue) {
+      logValue("Setting value to LED1: ", valueInt);
+      led1SetValue = valueInt;
     }
-    if (_switch){
-      for (int i=0;i<length;i++) {
-        char receivedChar = (char)payload[i];
-        if (receivedChar == '1'){
-          led1SetValue= 1023;
-          strncpy(value, "1023",4);
-          Serial.print("Switch on");
-          myESP.publish(join(mqtt_id,"/Led1/status"),"1");
-        }
-        if (receivedChar == '0'){
-          led1SetValue= 0;
-          strncpy(value, "0",1);
-          Serial.print("Switch off");
-          myESP.publish(join(mqtt_id,"/Led1/status"),"0");
-        }
+
+    if (topicSwitch) {
+      if (valueInt) {
+        logInfo("Switch on LED1");
+      } else {
+        logInfo("Switch off LED1");
       }
+      led1SetValue = valueInt ? 1023 : 0;
     }
-    myESP.publish(join(mqtt_id,"/Led1/rvalue"),value);
-    Serial.println();
-    Serial.println("Returning status");
+
+    myESP.publish(MQTT_ID "/Led1/status", led1SetValue ? "1" : "0");
+    myESP.publish(MQTT_ID "/Led1/rvalue", String(led1SetValue).c_str());
   }
-  if(_led2){
-    if (_value){
-      led2SetValue = atoi( value );
-      Serial.print("setting value to:");
-      Serial.print(atoi( value ));
-      if (led2SetValue  == 0) {myESP.publish(join(mqtt_id,"/Led2/status"),"0"); }
-      else {myESP.publish(join(mqtt_id,"/Led2/status"),"1");}
+
+
+  if (topicLed2) {
+    if (topicValue) {
+      logValue("Setting value to LED2: ", valueInt);
+      led2SetValue = valueInt;
     }
-    if (_switch){
-      for (int i=0;i<length;i++) {
-        char receivedChar = (char)payload[i];
-        if (receivedChar == '1'){
-          led2SetValue= 1023;
-          strncpy(value, "1023",4);
-          Serial.print("Switch on");
-          myESP.publish(join(mqtt_id,"/Led2/status"),"1");
-        }
-        if (receivedChar == '0'){
-          led2SetValue = 0;
-          strncpy(value, "0",1);
-          Serial.print("Switch off");
-          myESP.publish(join(mqtt_id,"/Led2/status"),"0");
-        }
+    if (topicSwitch) {
+      if (valueInt) {
+        logInfo("Switch on LED2");
+      } else {
+        logInfo("Switch off LED2");
       }
+      led2SetValue = valueInt ? 1023 : 0;
     }
-    myESP.publish(join(mqtt_id,"/Led2/rvalue"),value);
-    Serial.println("Returning status");
+    myESP.publish(MQTT_ID "/Led2/status", led2SetValue ? "1" : "0");
+    myESP.publish(MQTT_ID "/Led2/rvalue", String(led2SetValue).c_str());
   }
-  Serial.println();
+  logInfo("Message processing finished");
 }
+

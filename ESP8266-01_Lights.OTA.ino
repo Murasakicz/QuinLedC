@@ -2,7 +2,7 @@
 #include "logBuffer.h"
 
 
-netInfo homeNet = {  .mqttHost = "192.168.100.20",     //can be blank if not using MQTT
+netInfo homeNet = {  .mqttHost = "",     //can be blank if not using MQTT
                      .mqttUser = "",   //can be blank
                      .mqttPass = "",   //can be blank
                      .mqttPort = 1883,         //default port for MQTT is 1883 - only chance if needed.
@@ -14,9 +14,13 @@ ESPHelper myESP(&homeNet);
 ESP8266WebServer server(80);
 
 
-#define MQTT_ID "/QuinLed_1"
+#define MQTT_ID "/QuinLed_2"
+#define OTA_PASSWORD ""
 #define PIN_LED1 0 // Pin with 0
 #define PIN_LED2 2 // Pin with 1
+
+const char* www_username = "admin";
+const char* www_password = "esp8266";
 
 
 int led1Value = 0, led2Value = 0;
@@ -58,7 +62,7 @@ void setup() {
   logInfo("Starting Up, Please Wait...");
 
   myESP.OTA_enable();
-  myESP.OTA_setPassword("Mura153624saki");
+  myESP.OTA_setPassword(OTA_PASSWORD);
   myESP.OTA_setHostnameWithVersion("Lights.v1");
 
   myESP.addSubscription(MQTT_ID "/Led1/value");
@@ -69,7 +73,11 @@ void setup() {
   myESP.setMQTTCallback(callback);
   myESP.begin();
 
-
+  server.on("/", [](){
+    if(!server.authenticate(www_username, www_password))
+      return server.requestAuthentication();
+    server.send(200, "text/plain", "Login OK");
+  });
   server.on("/log", HTTP_GET, []() {
     logBuffer.dumpTo(&server);
   });
@@ -110,7 +118,7 @@ void callback(char* topic, uint8_t* payload, unsigned int length) {
 
     if (topicSwitch) {
       if (valueInt) {
-        if (led1Value > 0){
+        if (led1SetValue > 0){
           logInfo("Switch already on LED1");
         }else{
           led1SetValue = 1023;
@@ -134,7 +142,7 @@ void callback(char* topic, uint8_t* payload, unsigned int length) {
     }
     if (topicSwitch) {
       if (valueInt) {
-        if (led2Value > 0){
+        if (led2SetValue > 0){
           logInfo("Switch already on LED2");
         }else{
           led2SetValue = 1023;
